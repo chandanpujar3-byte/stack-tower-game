@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Stack Tower</title>
+<style>
+:root{--bg:#0b1020;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#05070f}}
+:root[data-theme="dark"]{--bg:#05070f}
+html,body{height:100%;margin:0}
+body{background:var(--bg);display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none;font-family:system-ui,-apple-system,sans-serif}
+canvas{height:100%;max-width:100%;aspect-ratio:9/16;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="720" height="1280"></canvas>
+<script>
+const cv=document.getElementById("c"),ctx=cv.getContext("2d");
+ctx.scale(2,2);
+const W=360,H=640,BH=28,BASE=H-110;
+let best=0;
+try{best=+localStorage.getItem("stackBest")||0}catch(e){}
+let state="ready",blocks,cur,debris,flashes,score,combo,camY,camT,t0=0,overAt=0,audio;
+
+function beep(f,d,type){
+  try{
+    audio=audio||new (window.AudioContext||window.webkitAudioContext)();
+    const o=audio.createOscillator(),g=audio.createGain();
+    o.type=type||"triangle";o.frequency.value=f;
+    g.gain.setValueAtTime(.2,audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+d);
+    o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+d);
+  }catch(e){}
+}
+function hue(i){return (i*9+200)%360}
+function reset(){
+  blocks=[{x:80,w:200,h:hue(0)}];
+  debris=[];flashes=[];score=0;combo=0;camY=0;camT=0;
+  spawn();
+}
+function spawn(){
+  const p=blocks[blocks.length-1];
+  cur={x:-p.w,w:p.w,dir:1,h:hue(blocks.length)};
+}
+function speed(){return Math.min(2.4+score*.09,7.5)}
+function drop(){
+  const p=blocks[blocks.length-1];
+  const l=Math.max(cur.x,p.x),r=Math.min(cur.x+cur.w,p.x+p.w),ov=r-l;
+  if(ov<=0){
+    debris.push({x:cur.x,w:cur.w,h:cur.h,y:blocks.length,vy:0,a:1});
+    state="over";overAt=performance.now();
+    beep(160,.5,"sawtooth");
+    if(score>best){best=score;try{localStorage.setItem("stackBest",best)}catch(e){}}
+    return;
+  }
+  const lvl=blocks.length;
+  if(Math.abs(cur.x-p.x)<5){
+    combo++;score+=2;
+    let w=p.w,x=p.x;
+    if(combo>=3&&w<220){w=Math.min(w+8,220);x=Math.max(0,Math.min(W-w,x-4))}
+    blocks.push({x,w,h:cur.h});
+    flashes.push({lvl,x,w,a:1});
+    beep(520+Math.min(combo,12)*70,.25,"sine");
+  }else{
+    combo=0;score++;
+    if(cur.x<p.x)debris.push({x:cur.x,w:p.x-cur.x,h:cur.h,y:lvl,vy:0,a:1});
+    else debris.push({x:p.x+p.w,w:cur.x+cur.w-(p.x+p.w),h:cur.h,y:lvl,vy:0,a:1});
+    blocks.push({x:l,w:ov,h:cur.h});
+    beep(330,.12);
+  }
+  camT=Math.max(0,(blocks.length-6)*BH);
+  spawn();
+}
+function tap(){
+  if(state==="ready"){state="play";reset();beep(440,.1)}
+  else if(state==="play")drop();
+  else if(state==="over"&&performance.now()-overAt>450){state="play";reset();beep(440,.1)}
+}
+function shareScore(){
+  const msg="I scored "+score+" in Stack Tower! Can you beat me?";
+  const url=location.href;
+  if(navigator.share){navigator.share({text:msg,url}).catch(()=>{})}
+  else if(navigator.clipboard){navigator.clipboard.writeText(msg+" "+url).then(()=>{toast=90}).catch(()=>{})}
+}
+let toast=0;
+cv.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(state==="over"&&performance.now()-overAt>450){
+    const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W,y=(e.clientY-r.top)/r.height*H;
+    if(x>90&&x<270&&y>490&&y<540){shareScore();return}
+  }
+  tap();
+});
+addEventListener("keydown",e=>{if(e.code==="Space"||e.key==="Enter"){e.preventDefault();tap()}});
+
+function sy(lvl){return BASE-lvl*BH+camY}
+function block(x,y,w,h,a){
+  ctx.globalAlpha=a==null?1:a;
+  ctx.fillStyle=`hsl(${h} 70% 55%)`;ctx.fillRect(x,y,w,BH-2);
+  ctx.fillStyle=`hsl(${h} 80% 72%)`;ctx.fillRect(x,y,w,6);
+  ctx.fillStyle=`hsl(${h} 70% 38%)`;ctx.fillRect(x,y+BH-8,w,6);
+  ctx.globalAlpha=1;
+}
+function text(s,x,y,size,col,al){
+  ctx.fillStyle=col||"#fff";ctx.font=`800 ${size}px system-ui,sans-serif`;ctx.textAlign=al||"center";ctx.fillText(s,x,y);
+}
+function frame(){
+  if(state==="play"){
+    cur.x+=cur.dir*speed();
+    if(cur.x+cur.w>W){cur.x=W-cur.w;cur.dir=-1}
+    if(cur.x<0){cur.x=0;cur.dir=1}
+  }
+  camY+=(camT-camY)*.12;
+  const hb=hue(blocks?blocks.length:0);
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,`hsl(${hb} 60% 22%)`);g.addColorStop(1,`hsl(${hb+40} 70% 8%)`);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  if(blocks){
+    blocks.forEach((b,i)=>{const y=sy(i);if(y>-BH&&y<H)block(b.x,y,b.w,b.h)});
+    flashes.forEach(f=>{
+      ctx.globalAlpha=f.a;ctx.fillStyle="#fff";ctx.fillRect(f.x-4,sy(f.lvl)-4,f.w+8,BH+6);ctx.globalAlpha=1;f.a-=.06;
+    });
+    flashes=flashes.filter(f=>f.a>0);
+    debris.forEach(d=>{d.vy+=.6;d.y-=d.vy/BH;d.a-=.012;block(d.x,sy(d.y),d.w,d.h,Math.max(d.a,0))});
+    debris=debris.filter(d=>d.a>0);
+    if(state==="play")block(cur.x,sy(blocks.length),cur.w,cur.h);
+  }
+  if(state==="play"){
+    text(score,W/2,90,64,"rgba(255,255,255,.95)");
+    if(combo>=2)text("PERFECT x"+combo,W/2,125,20,"#fde68a");
+  }else if(state==="ready"){
+    text("STACK",W/2,200,64);text("TOWER",W/2,262,64,"#7dd3fc");
+    text("Tap to drop each block.",W/2,330,18,"rgba(255,255,255,.85)");
+    text("Line it up perfectly to grow!",W/2,358,18,"rgba(255,255,255,.85)");
+    text("TAP TO START",W/2,460,26,"#fde68a");
+    if(best)text("Best: "+best,W/2,500,20);
+  }else{
+    ctx.fillStyle="rgba(0,0,0,.55)";ctx.fillRect(0,0,W,H);
+    text("GAME OVER",W/2,230,44);
+    text(score,W/2,320,84,"#fde68a");
+    text("Best: "+best+(score>=best&&score>0?"  NEW!":""),W/2,370,22);
+    text("TAP TO RETRY",W/2,450,26,"#7dd3fc");
+    ctx.fillStyle="#22c55e";ctx.fillRect(90,490,180,50);
+    text("SHARE SCORE",W/2,523,22,"#052e16");
+    if(toast>0){toast--;text("Copied! Paste it in a chat",W/2,580,16,"#fde68a")}
+  }
+  requestAnimationFrame(frame);
+}
+reset();
+frame();
+</script>
+</body>
+</html>
